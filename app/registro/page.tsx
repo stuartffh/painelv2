@@ -66,21 +66,36 @@ export default function RegistroPage() {
     setIsLoading(true);
     
     try {
-      // Simulação de registro - em produção seria uma chamada de API
-      setTimeout(() => {
-        toast({
-          title: "Conta criada com sucesso!",
-          description: "Redirecionando para o seu painel...",
-        });
-        router.push("/dashboard");
-        setIsLoading(false);
-      }, 1500);
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: values.name,
+          email: values.email,
+          password: values.password,
+          plan: planoSelecionado,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Erro ao criar conta");
+      }
+
+      toast({
+        title: "Conta criada com sucesso!",
+        description: "Redirecionando para o login...",
+      });
+
+      router.push("/login");
     } catch (error) {
       toast({
         title: "Erro ao criar conta",
         description: "Ocorreu um erro ao tentar criar sua conta.",
         variant: "destructive",
       });
+    } finally {
       setIsLoading(false);
     }
   };
@@ -109,7 +124,7 @@ export default function RegistroPage() {
                     <FormItem>
                       <FormLabel>Nome completo</FormLabel>
                       <FormControl>
-                        <Input placeholder="João Silva" {...field} />
+                        <Input placeholder="João Silva" {...field} disabled={isLoading} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -122,7 +137,7 @@ export default function RegistroPage() {
                     <FormItem>
                       <FormLabel>Email</FormLabel>
                       <FormControl>
-                        <Input placeholder="seu@email.com" {...field} />
+                        <Input placeholder="seu@email.com" {...field} disabled={isLoading} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -135,7 +150,12 @@ export default function RegistroPage() {
                     <FormItem>
                       <FormLabel>Senha</FormLabel>
                       <FormControl>
-                        <Input type="password" placeholder="••••••••" {...field} />
+                        <Input 
+                          type="password" 
+                          placeholder="••••••••" 
+                          {...field} 
+                          disabled={isLoading}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -148,7 +168,12 @@ export default function RegistroPage() {
                     <FormItem>
                       <FormLabel>Confirmar senha</FormLabel>
                       <FormControl>
-                        <Input type="password" placeholder="••••••••" {...field} />
+                        <Input 
+                          type="password" 
+                          placeholder="••••••••" 
+                          {...field} 
+                          disabled={isLoading}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -156,7 +181,11 @@ export default function RegistroPage() {
                 />
               </CardContent>
               <CardFooter className="flex flex-col gap-4">
-                <Button type="submit" className="w-full" disabled={isLoading}>
+                <Button 
+                  type="submit" 
+                  className="w-full"
+                  disabled={isLoading}
+                >
                   {isLoading ? "Criando conta..." : "Criar conta"}
                 </Button>
                 <p className="text-center text-sm text-muted-foreground">

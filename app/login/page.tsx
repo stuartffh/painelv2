@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -24,42 +25,49 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
+  
+  const callbackUrl = searchParams.get("callbackUrl") || "/dashboard";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
+
     try {
-      // Simulação de login - em produção, isso seria uma chamada API real
-      setTimeout(() => {
-        if (email === "admin@example.com" && password === "admin") {
-          toast({
-            title: "Login realizado com sucesso",
-            description: "Redirecionando para o painel administrativo...",
-          });
-          router.push("/admin");
-        } else if (email === "cliente@example.com" && password === "cliente") {
-          toast({
-            title: "Login realizado com sucesso",
-            description: "Redirecionando para seu painel...",
-          });
-          router.push("/dashboard");
-        } else {
-          toast({
-            title: "Erro ao fazer login",
-            description: "Email ou senha incorretos.",
-            variant: "destructive",
-          });
-        }
-        setIsLoading(false);
-      }, 1500);
+      const result = await signIn("credentials", {
+        email,
+        password,
+        redirect: false,
+      });
+
+      if (result?.error) {
+        toast({
+          title: "Erro ao fazer login",
+          description: result.error,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Verificar o papel do usuário para redirecionar
+      if (email === "admin@example.com") {
+        router.push("/admin");
+      } else {
+        router.push(callbackUrl);
+      }
+
+      toast({
+        title: "Login realizado com sucesso",
+        description: "Redirecionando para o painel...",
+      });
     } catch (error) {
       toast({
         title: "Erro ao fazer login",
         description: "Ocorreu um erro ao tentar fazer login.",
         variant: "destructive",
       });
+    } finally {
       setIsLoading(false);
     }
   };
@@ -90,6 +98,7 @@ export default function LoginPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  disabled={isLoading}
                 />
               </div>
               <div className="space-y-2">
@@ -109,11 +118,16 @@ export default function LoginPage() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  disabled={isLoading}
                 />
               </div>
             </CardContent>
             <CardFooter className="flex flex-col gap-4">
-              <Button type="submit" className="w-full" disabled={isLoading}>
+              <Button 
+                type="submit" 
+                className="w-full"
+                disabled={isLoading}
+              >
                 {isLoading ? "Entrando..." : "Entrar"}
               </Button>
               <p className="text-center text-sm text-muted-foreground">

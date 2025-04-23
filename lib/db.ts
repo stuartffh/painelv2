@@ -1,6 +1,7 @@
-import { Database } from 'better-sqlite3';
+import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 
 // Garantir que o diretório existe
 const dbDir = path.join(process.cwd(), 'data');
@@ -9,16 +10,13 @@ if (!fs.existsSync(dbDir)) {
 }
 
 const dbPath = path.join(dbDir, 'evolution-api.db');
-let db: Database | null = null;
+let db: Database.Database | null = null;
 
-// Função para inicializar o banco de dados
 export function getDb() {
   if (!db) {
-    // Importação dinâmica para evitar erros durante o build do Next.js
-    const BetterSqlite3 = require('better-sqlite3');
-    db = new BetterSqlite3(dbPath);
+    db = new Database(dbPath);
     
-    // Inicializar tabelas
+    // Criar tabelas
     db.exec(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
@@ -30,22 +28,13 @@ export function getDb() {
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
 
-      CREATE TABLE IF NOT EXISTS instances (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        client_id TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'disconnected',
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-        FOREIGN KEY (client_id) REFERENCES users (id)
-      );
-
       CREATE TABLE IF NOT EXISTS plans (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         description TEXT,
         price REAL NOT NULL,
         instance_limit INTEGER NOT NULL,
+        features TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
@@ -54,13 +43,25 @@ export function getDb() {
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
         plan_id TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'active',
+        status TEXT NOT NULL DEFAULT 'pending',
         start_date TEXT NOT NULL DEFAULT (datetime('now')),
         end_date TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-        FOREIGN KEY (user_id) REFERENCES users (id),
-        FOREIGN KEY (plan_id) REFERENCES plans (id)
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        FOREIGN KEY (plan_id) REFERENCES plans(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS instances (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'disconnected',
+        phone TEXT,
+        qr_code TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (user_id) REFERENCES users(id)
       );
 
       CREATE TABLE IF NOT EXISTS activity_logs (
@@ -69,33 +70,52 @@ export function getDb() {
         action TEXT NOT NULL,
         details TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        FOREIGN KEY (user_id) REFERENCES users (id)
+        FOREIGN KEY (user_id) REFERENCES users(id)
       );
+
+      CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+      CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
+      CREATE INDEX IF NOT EXISTS idx_instances_user_id ON instances(user_id);
+      CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON activity_logs(user_id);
     `);
 
-    // Inserir plano padrão se não existir
+    // Inserir planos padrão se não existirem
     const plansCount = db.prepare('SELECT COUNT(*) as count FROM plans').get();
     if (plansCount.count === 0) {
       db.prepare(`
-        INSERT INTO plans (id, name, description, price, instance_limit)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO plans (id, name, description, price, instance_limit, features)
+        VALUES (?, ?, ?, ?, ?, ?)
       `).run(
-        'plan_basic',
+        randomUUID(),
         'Básico',
         'Plano básico com 1 instância',
         29.90,
-        1
+        1,
+        JSON.stringify(['1 instância', 'Suporte por email', 'Acesso ao painel básico'])
       );
       
       db.prepare(`
-        INSERT INTO plans (id, name, description, price, instance_limit)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO plans (id, name, description, price, instance_limit, features)
+        VALUES (?, ?, ?, ?, ?, ?)
       `).run(
-        'plan_premium',
-        'Premium',
-        'Plano premium com 5 instâncias',
+        randomUUID(),
+        'Profissional',
+        'Plano profissional com 5 instâncias',
         99.90,
-        5
+        5,
+        JSON.stringify(['5 instâncias', 'Suporte prioritário', 'Acesso completo ao painel', 'Automações básicas'])
+      );
+
+      db.prepare(`
+        INSERT INTO plans (id, name, description, price, instance_limit, features)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        randomUUID(),
+        'Empresarial',
+        'Plano empresarial com 15 instâncias',
+        249.90,
+        15,
+        JSON.stringify(['15 instâncias', 'Suporte 24/7', 'Acesso completo ao painel', 'Automações avançadas', 'API personalizada'])
       );
     }
   }
@@ -103,7 +123,7 @@ export function getDb() {
   return db;
 }
 
-// Usuários
+// Funções de usuário
 export function createUser(user: {
   id: string;
   name: string;
@@ -141,23 +161,23 @@ export function getAllUsers() {
   return db.prepare('SELECT id, name, email, role, created_at FROM users').all();
 }
 
-// Instâncias
+// Funções de instância
 export function createInstance(instance: {
   id: string;
   name: string;
-  client_id: string;
+  user_id: string;
   status?: string;
 }) {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO instances (id, name, client_id, status)
+    INSERT INTO instances (id, name, user_id, status)
     VALUES (?, ?, ?, ?)
   `);
   
   return stmt.run(
     instance.id,
     instance.name,
-    instance.client_id,
+    instance.user_id,
     instance.status || 'disconnected'
   );
 }
@@ -167,18 +187,9 @@ export function getInstanceById(id: string) {
   return db.prepare('SELECT * FROM instances WHERE id = ?').get(id);
 }
 
-export function getInstancesByClientId(clientId: string) {
+export function getInstancesByUserId(userId: string) {
   const db = getDb();
-  return db.prepare('SELECT * FROM instances WHERE client_id = ?').all(clientId);
-}
-
-export function getAllInstances() {
-  const db = getDb();
-  return db.prepare(`
-    SELECT i.*, u.name as client_name 
-    FROM instances i
-    JOIN users u ON i.client_id = u.id
-  `).all();
+  return db.prepare('SELECT * FROM instances WHERE user_id = ?').all(userId);
 }
 
 export function updateInstanceStatus(id: string, status: string) {
@@ -192,13 +203,42 @@ export function updateInstanceStatus(id: string, status: string) {
   return stmt.run(status, id);
 }
 
-// Planos
-export function getAllPlans() {
+// Funções de assinatura
+export function createSubscription(subscription: {
+  id: string;
+  user_id: string;
+  plan_id: string;
+  status?: string;
+  end_date?: string;
+}) {
   const db = getDb();
-  return db.prepare('SELECT * FROM plans').all();
+  const stmt = db.prepare(`
+    INSERT INTO subscriptions (id, user_id, plan_id, status, end_date)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  
+  return stmt.run(
+    subscription.id,
+    subscription.user_id,
+    subscription.plan_id,
+    subscription.status || 'pending',
+    subscription.end_date || null
+  );
 }
 
-// Logs
+export function getActiveSubscriptionByUserId(userId: string) {
+  const db = getDb();
+  return db.prepare(`
+    SELECT s.*, p.name as plan_name, p.instance_limit 
+    FROM subscriptions s
+    JOIN plans p ON s.plan_id = p.id
+    WHERE s.user_id = ? 
+    AND s.status = 'active'
+    AND (s.end_date IS NULL OR s.end_date > datetime('now'))
+  `).get(userId);
+}
+
+// Funções de log
 export function createLog(log: {
   id: string;
   user_id: string;
@@ -229,18 +269,7 @@ export function getLogsByUserId(userId: string, limit = 50) {
   `).all(userId, limit);
 }
 
-export function getAllLogs(limit = 100) {
-  const db = getDb();
-  return db.prepare(`
-    SELECT l.*, u.name as user_name 
-    FROM activity_logs l
-    JOIN users u ON l.user_id = u.id
-    ORDER BY l.created_at DESC
-    LIMIT ?
-  `).all(limit);
-}
-
-// Métricas
+// Métricas do dashboard
 export function getDashboardMetrics() {
   const db = getDb();
   
